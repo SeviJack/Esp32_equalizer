@@ -5,6 +5,7 @@ pygame.init()
 
 SCALE_VALUE = 1  # adjust as needed  # 0.1 = small bars, 1.0 = full height
 GATE = 0.02         # adjust as needed  # 0.02 = ignore <2% of max power
+DC_CUTTOFF = 0
 
 w, h = 32, 32
 margin_x, margin_y = 6, 2
@@ -37,25 +38,28 @@ def audio_callback(indata, frames, time, status):
     global bars
     # convert stereo to mono
     mono = np.mean(indata, axis=1)
-    # FFT magnitude (skip DC)
+    # FFT magnitude (skip DC) + mild compression + equalization
     fft = np.fft.rfft(mono)
-    mag = np.abs(fft)[1:]        # drop bin 0
-    mag = np.log10(mag + 1)     # compress bass dominance
+    mag = np.abs(fft)[DC_CUTTOFF:]
+    mag = np.log10(mag + 1)
+    freqs = np.fft.rfftfreq(len(mono), 1.0 / samplerate)[DC_CUTTOFF:]
+    a_weight = (freqs**2) / (freqs**2 + 200**2)
+    mag *= a_weight
 
-    
     # choose frequency window
     fmin, fmax = 20, 8000   # adjust as needed
 
-    freqs = np.fft.rfftfreq(len(mono), 1.0 / samplerate)[1:]
+    freqs = np.fft.rfftfreq(len(mono), 1.0 / samplerate)[DC_CUTTOFF:]
 
     mask = (freqs >= fmin) & (freqs <= fmax)
     mag = mag[mask]
     freqs = freqs[mask]
 
+
     # map trimmed range to display width
     bins = np.array_split(np.arange(len(mag)), w)
     # values = [np.mean(mag[b]) for b in bins]
-    weights = np.linspace(1.0, 5.0, w)  # 1x gain low → 3x gain high
+    weights = np.linspace(1.5, 5.0, w)  # 1x gain low → 3x gain high
     values = [np.mean(mag[b]) * weights[i] for i, b in enumerate(bins)]
 
 
