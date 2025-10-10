@@ -1,4 +1,4 @@
-import pygame, random
+import pygame, random, pyaudio, numpy, soundfile as sf
 pygame.init()
 
 w, h = 32, 32
@@ -31,6 +31,9 @@ while True:
 
     for y in range(h):
         for x in range(w):
+            #audio monitoring logic
+            #frequency to leds
+
             # last row red, others teal
             if y == h - 1:
                 edge_c, core_c = edge_red, core_red
