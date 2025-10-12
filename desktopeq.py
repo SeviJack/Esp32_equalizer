@@ -1,7 +1,8 @@
-import pygame
+import pygame, sys
 import numpy as np
 import sounddevice as sd
 
+pygame.display.set_caption("ESP32 Audio Visualizer Emulator")
 pygame.init()
 
 SCALE_VALUE = 1  # adjust as needed  # 0.1 = small bars, 1.0 = full height
@@ -137,7 +138,7 @@ peak_bars = np.zeros
 while True:
     for e in pygame.event.get():
         if e.type == pygame.QUIT:
-            stream.stop(); stream.close(); exit()
+            stream.stop(); stream.close(); sys.exit()
         elif e.type == pygame.VIDEORESIZE:
             # Optional: handle aspect ratio or update variables if needed
             screen = pygame.display.set_mode(e.size, pygame.RESIZABLE)
