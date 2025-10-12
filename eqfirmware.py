@@ -1,4 +1,5 @@
-import pygame, random, pyaudio
+
+import pygame
 import numpy as np
 import sounddevice as sd
 
@@ -15,18 +16,18 @@ output_name = sd.query_devices(default_output)['name']
 
 # look for "(loopback)" version of that device
 devices = sd.query_devices()
-print(devices)
+# print(devices)
 loopback_index = None
 for i, d in enumerate(devices):
     if "Loopback" in d['name'] and output_name.split(' (')[0] in d['name']:
         loopback_index = i
         break
 if loopback_index is None:
-    print("No matching loopback device found. Using default input.")
+    # print("No matching loopback device found. Using default input.")
     loopback_index = sd.default.device[0]
 
 input_device = loopback_index
-print(f"Using loopback: {sd.query_devices(input_device)['name']}")
+# print(f"Using loopback: {sd.query_devices(input_device)['name']}")
 
 
 w, h = 32, 32
@@ -89,7 +90,7 @@ def audio_callback(indata, frames, time, status):
     # map trimmed range to display width
     bins = np.array_split(np.arange(len(mag)), w)
     # values = [np.mean(mag[b]) for b in bins]
-    weights = np.linspace(1.5, 5.0, w)  # 1x gain low → 3x gain high
+    weights = np.linspace(0.9, 5.0, w)  # 1.5x gain low → 5x gain high
     values = [np.mean(mag[b]) * weights[i] for i, b in enumerate(bins)]
 
 
@@ -169,3 +170,4 @@ while True:
     screen.blit(scaled, (0, 0))
     pygame.display.flip()
     clock.tick(30)
+
