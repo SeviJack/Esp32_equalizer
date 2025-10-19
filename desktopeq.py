@@ -3,13 +3,20 @@ import numpy as np
 import sounddevice as sd
 import win32gui, win32con
 
+#todo
+# custom window frame
+# - transparent background button
+# - click to toggle topmost
+# - click and drag to move window
+# - resize handle
+# fix the damn logscale for bass
 
 pygame.display.set_caption("ESP32 Audio Visualizer Emulator")
 pygame.init()
 font = pygame.font.SysFont("Consolas", 10)  # small, clear font
 
 fmin, fmax = 40, 6000  # Hz range
-SCALE_VALUE = 1  # adjust as needed  # 0.1 = small bars, 1.0 = full height
+SCALE_VALUE = 1  # adjust as needed  # 0.1 = small gain_nodes, 1.0 = full height
 GATE = 0.02         # adjust as needed  # 0.02 = ignore <2% of max power
 DC_CUTTOFF = 0
 
@@ -33,8 +40,7 @@ bg = (5, 10, 10)
 label_color = (100, 100, 100)
 
 
-screen = pygame.display.set_mode((total_w, total_h), pygame.RESIZABLE)
-
+screen = pygame.display.set_mode((total_w, total_h), pygame.RESIZABLE) #noframe
 base_surface = pygame.Surface((total_w, total_h))  # offscreen render
 fade_surface = pygame.Surface((total_w, total_h), pygame.SRCALPHA)
 
@@ -42,7 +48,7 @@ fade_surface = pygame.Surface((total_w, total_h), pygame.SRCALPHA)
 samplerate = 48000
 blocksize = 8192*2  # ~0.16s latency
 
-bars = np.zeros(w)
+gain_nodes = np.zeros(w)
 smoothed = np.zeros(w)
 
 # find default output and its loopback
@@ -70,7 +76,7 @@ def make_top_level_window(N, cutoff=DC_CUTTOFF):
 make_top_level_window(screen, DC_CUTTOFF)
 
 def audio_callback(indata, frames, time, status):
-    global bars, fmin, fmax
+    global gain_nodes, fmin, fmax
     
     # stereo → mono
     mono = np.mean(indata, axis=1)
@@ -129,7 +135,7 @@ def audio_callback(indata, frames, time, status):
     values /= np.max(values + 1e-6)
     values[values < GATE] = 0
     values *= h * SCALE_VALUE
-    bars = values
+    gain_nodes = values
 
 
 
@@ -143,7 +149,7 @@ stream.start()
 
 # smoothing factor (lower = slower)
 alpha = 0.15 #4
-peak_bars = np.zeros
+peak_gain_nodes = np.zeros
 
 freq_bins = np.geomspace(fmin, fmax, w + 1)
 freq_labels = [(freq_bins[i] + freq_bins[i+1]) / 2 for i in range(w)]
@@ -162,9 +168,9 @@ while True:
     base_surface.blit(fade_surface, (0, 0))
 
     # exponential smoothing
-    smoothed = alpha * bars + (1 - alpha) * smoothed 
+    smoothed = alpha * gain_nodes + (1 - alpha) * smoothed 
 
-    # draw bars and labels
+    # draw gain_nodes and labels
     for x in range(w):
         height = int(smoothed[x])
         X = padding_x + x * cell_x
