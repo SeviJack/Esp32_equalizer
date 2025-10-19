@@ -1,6 +1,8 @@
 import pygame, sys
 import numpy as np
 import sounddevice as sd
+import win32gui, win32con
+
 
 pygame.display.set_caption("ESP32 Audio Visualizer Emulator")
 pygame.init()
@@ -32,12 +34,13 @@ label_color = (100, 100, 100)
 
 
 screen = pygame.display.set_mode((total_w, total_h), pygame.RESIZABLE)
+
 base_surface = pygame.Surface((total_w, total_h))  # offscreen render
 fade_surface = pygame.Surface((total_w, total_h), pygame.SRCALPHA)
 
 # audio parameters
 samplerate = 48000
-blocksize = 4096*2*2
+blocksize = 8192*2  # ~0.16s latency
 
 bars = np.zeros(w)
 smoothed = np.zeros(w)
@@ -58,24 +61,46 @@ if loopback_index is None:
 
 input_device = loopback_index
 
+def make_top_level_window(N, cutoff=DC_CUTTOFF):
+    hwnd = pygame.display.get_wm_info()["window"]
+    win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE,
+                           win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE) | win32con.WS_EX_TOPMOST)
+    win32gui.SetWindowPos(hwnd, win32con.HWND_TOPMOST, 0, 0, 0, 0,
+                          win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | cutoff)
+make_top_level_window(screen, DC_CUTTOFF)
+
 def audio_callback(indata, frames, time, status):
     global bars, fmin, fmax
     
-
     # stereo → mono
     mono = np.mean(indata, axis=1)
+    # --- Dual-FFT hybrid for low + high frequencies ---
 
-    # apply window to reduce spectral leakage
-    window = np.hanning(len(mono))
-    fft = np.fft.rfft(mono * window)
+    # long FFT for low end
+    low_block = 8192     # ~0.17 s latency @48k
+    low_window = np.hanning(min(len(mono), low_block))
+    low_fft = np.fft.rfft(mono[:low_block] * low_window)
+    mag_low = np.abs(low_fft)
+    freqs_low = np.fft.rfftfreq(low_block, 1.0 / samplerate)
+
+    # short FFT for highs
+    high_block = 2048    # ~0.043 s latency
+    high_window = np.hanning(min(len(mono), high_block))
+    high_fft = np.fft.rfft(mono[:high_block] * high_window)
+    mag_high = np.abs(high_fft)
+    freqs_high = np.fft.rfftfreq(high_block, 1.0 / samplerate)
+
+    # merge around crossover frequency
+    split = 300  # Hz
+    mask_low = freqs_low < split
+    mask_high = freqs_high >= split
+
+    freqs = np.concatenate((freqs_low[mask_low], freqs_high[mask_high]))
+    mag = np.concatenate((mag_low[mask_low], mag_high[mask_high]))
+
 
     # magnitude spectrum
-    mag = np.abs(fft)[DC_CUTTOFF:]
     mag = np.log10(mag + 1)
-
-    # frequency vector
-    freqs = np.fft.rfftfreq(len(mono), 1.0 / samplerate)[DC_CUTTOFF:]
-
     # A-weighting style correction
     a_weight = (freqs**2) / (freqs**2 + 200**2)
     mag *= a_weight
@@ -129,8 +154,10 @@ while True:
             stream.stop(); stream.close(); sys.exit()
         elif e.type == pygame.VIDEORESIZE:
             screen = pygame.display.set_mode(e.size, pygame.RESIZABLE)
-
-
+            pygame.event.pump()
+            hwnd = pygame.display.get_wm_info()["window"]
+            make_top_level_window(hwnd)
+    # clear base surface    
     fade_surface.fill((0, 0, 0, 40))
     base_surface.blit(fade_surface, (0, 0))
 
@@ -158,9 +185,10 @@ while True:
         text_rect = text_surface.get_rect(center=(X + led_w / 2, Y_base + led_h + 14))
         base_surface.blit(text_surface, text_rect)
 
-
+    
     # after all drawing done on base_surface:
     scaled = pygame.transform.smoothscale(base_surface, screen.get_size())
     screen.blit(scaled, (0, 0))
+    make_top_level_window(screen, DC_CUTTOFF)
     pygame.display.flip()
     clock.tick(30)
