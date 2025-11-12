@@ -10,6 +10,7 @@ import win32gui, win32con
 # - click and drag to move window
 # - resize handle
 # fix the damn logscale for bass
+# add icon
 
 pygame.display.set_caption("ESP32 Audio Visualizer Emulator")
 pygame.init()
