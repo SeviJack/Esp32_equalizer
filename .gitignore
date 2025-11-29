@@ -15,7 +15,7 @@
 *.so
 *.dylib
 *.dll
-
+*.spec
 # Fortran module files
 *.mod
 *.smod
@@ -25,7 +25,9 @@
 *.la
 *.a
 *.lib
-
+build/
+# Python cache files
+.venv/
 # Executables
 *.exe
 *.out

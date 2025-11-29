@@ -1,3 +1,4 @@
-pygame
+﻿pygame
 numpy
 sounddevice
+pywin32

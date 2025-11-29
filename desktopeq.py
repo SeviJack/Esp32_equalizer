@@ -3,7 +3,6 @@ import pygame, sys
 import numpy as np
 import sounddevice as sd
 import win32gui, win32con
-from ctypes import wintypes
 #todo
 # custom window frame
 # - transparent background button
@@ -32,7 +31,7 @@ padding_x, padding_y_top, padding_y_bottom = 20, 20, 30
 
 cell_x, cell_y = led_w + margin_x, led_h + margin_y
 total_w = w * cell_x - margin_x + 2 * padding_x
-total_h = h * cell_y - margin_y + padding_y_top + padding_y_bottom
+total_h = h * cell_y - margin_y + padding_y_top + padding_y_bottom + 4
 clock = pygame.time.Clock()
 
 # audio analysis parameters
@@ -52,27 +51,11 @@ peak_gain_nodes = np.zeros
 # freq_labels = [(freq_bins[i] + freq_bins[i+1]) / 2 for i in range(w)]
 
 centers = np.array([
-    # Bass (dense)
-    40, 50, 63, 80, 100, 125, 160, 200,
-    250, 315, 400,
-
-    # Low-mids to mids (moderate spacing)
-    500, 630, 800, 1000, 1250,
-    1600, 2000, 2500, 3150,
-
-    # High mids (sparser)
-    4000, 5000, 6300, 7500,
-
-    # Highs (very sparse, analog-style)
-    8500, 9500, 10000,
-
-    # Fill remaining to reach 32 with analog-like positions
-    120,   # smooth mid-bass anchor
-    180,   # analog EQs love this slot
-    2200,  # fills real analog dip
-    3600,  # aligns with classic VFD banding
-    7000   # balances high-end density
+    40,   50,   63,   80,   100,  120,  125,  160,  180,  200,  250,
+    315,  400,  500,  630,  800,  1000, 1250, 1600, 2000, 2200, 2500,
+    3150, 3600, 4000, 5000, 6300, 7000, 7500, 8500, 9500, 10000
 ])
+
 
 # Clamp to your fmin/fmax range
 centers = centers[(centers >= fmin) & (centers <= fmax)]
@@ -140,6 +123,21 @@ def make_top_level_window():
     )
 make_top_level_window()
 
+def move_window_bottom_right():
+    hwnd = pygame.display.get_wm_info()["window"]
+    screen_w = user32.GetSystemMetrics(0)
+    screen_h = user32.GetSystemMetrics(1)
+
+    # current pygame window size
+    win_w, win_h = screen.get_size()
+
+    x = screen_w - win_w
+    y = screen_h - win_h - 48  # taskbar offset
+
+    user32.SetWindowPos(hwnd, None, x, y, 0, 0,
+                        win32con.SWP_NOSIZE | win32con.SWP_NOZORDER)
+
+move_window_bottom_right()
 
 def audio_callback(indata, frames, time, status):
     global gain_nodes, smoothed, fmin, fmax
@@ -276,7 +274,7 @@ while True:
         pygame.draw.rect(base_surface, edge_red, (X, Y_base, led_w, led_h))
         pygame.draw.rect(base_surface, core_red, (X+1, Y_base+1, led_w-2, led_h-2))
         # draw label
-        base_surface.blit(label_surfaces[x], (X, total_h - padding_y_bottom + 4))
+        base_surface.blit(label_surfaces[x], (X, total_h - padding_y_bottom))
 
     
     # after all drawing done on base_surface:
