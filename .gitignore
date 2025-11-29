@@ -30,7 +30,12 @@ build/
 .venv/
 dist/
 # Executables
-*.exe
+
 *.out
 *.app
 portaudio
+.vs/
+*.pdb
+*.ilk
+*.meta
+*.obj
