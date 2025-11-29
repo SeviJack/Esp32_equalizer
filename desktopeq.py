@@ -16,23 +16,13 @@ from ctypes import wintypes
 #Constants 
 WM_NCLBUTTONDOWN = 0x00A1
 HTCAPTION = 0x02
-
+LOW_BLOCK = 8192
+HIGH_BLOCK = 1024
+SPLIT_FREQ = 300  # Hz
+last_size = (800, 400)
 user32 = ctypes.windll.user32
-
-# audio analysis parameters
-fmin, fmax = 40, 6000  # Hz range
-SCALE_VALUE = 1  # adjust as needed  # 0.1 = small gain_nodes, 1.0 = full height
-GATE = 0.02         # adjust as needed  # 0.02 = ignore <2% of max power
-DC_CUTTOFF = 0
-
-# audio parameters
-samplerate = 48000
-blocksize = 8192*2  # ~0.16s latency
-
-# visualization parameters
-w = 32  # number of bars
-gain_nodes = np.zeros(w)
-smoothed = np.zeros(w)
+ATTACK = 0.6   # 0..1, higher = snappier rise
+DECAY  = 0.85  # 0..1, lower = faster fall
 
 # display parameters
 w, h = 32, 32
@@ -44,6 +34,65 @@ cell_x, cell_y = led_w + margin_x, led_h + margin_y
 total_w = w * cell_x - margin_x + 2 * padding_x
 total_h = h * cell_y - margin_y + padding_y_top + padding_y_bottom
 clock = pygame.time.Clock()
+
+# audio analysis parameters
+fmin, fmax = 40, 10000  # Hz range
+SCALE_VALUE = 1  # adjust as needed  # 0.1 = small gain_nodes, 1.0 = full height
+GATE = 0.02         # adjust as needed  # 0.02 = ignore <2% of max power
+DC_CUTTOFF = 0
+
+# audio parameters
+samplerate = 48000
+blocksize = 8192  # ~0.16s latency
+# smoothing factor (lower = slower)
+alpha = 0.15 #4
+peak_gain_nodes = np.zeros
+
+# freq_bins = np.geomspace(fmin, fmax, w + 1)
+# freq_labels = [(freq_bins[i] + freq_bins[i+1]) / 2 for i in range(w)]
+
+centers = np.array([
+    # Bass (dense)
+    40, 50, 63, 80, 100, 125, 160, 200,
+    250, 315, 400,
+
+    # Low-mids to mids (moderate spacing)
+    500, 630, 800, 1000, 1250,
+    1600, 2000, 2500, 3150,
+
+    # High mids (sparser)
+    4000, 5000, 6300, 7500,
+
+    # Highs (very sparse, analog-style)
+    8500, 9500, 10000,
+
+    # Fill remaining to reach 32 with analog-like positions
+    120,   # smooth mid-bass anchor
+    180,   # analog EQs love this slot
+    2200,  # fills real analog dip
+    3600,  # aligns with classic VFD banding
+    7000   # balances high-end density
+])
+
+# Clamp to your fmin/fmax range
+centers = centers[(centers >= fmin) & (centers <= fmax)]
+w = len(centers)  # make w follow the band count
+
+# Bin edges are geometric midpoints between centers
+edges = np.zeros(w + 1)
+edges[1:-1] = np.sqrt(centers[:-1] * centers[1:])
+edges[0] = fmin
+edges[-1] = fmax
+
+freq_bins = edges
+freq_labels = centers
+
+
+
+# visualization parameters
+
+gain_nodes = np.zeros(w)
+smoothed = np.zeros(w)
 
 # VFD color palette
 core = (0, 255, 180)
@@ -89,74 +138,96 @@ def make_top_level_window():
         0, 0, 0, 0,
         win32con.SWP_NOMOVE | win32con.SWP_NOSIZE
     )
-
 make_top_level_window()
 
 
 def audio_callback(indata, frames, time, status):
-    global gain_nodes, fmin, fmax
+    global gain_nodes, smoothed, fmin, fmax
     
     # stereo → mono
     mono = np.mean(indata, axis=1)
+    if np.max(np.abs(mono)) < 1e-6:
+        gain_nodes.fill(0.0)
+        smoothed.fill(0.0)
+        return
     # --- Dual-FFT hybrid for low + high frequencies ---
 
-    # long FFT for low end
-    low_block = 8192     # ~0.17 s latency @48k
-    low_window = np.hanning(min(len(mono), low_block))
-    low_fft = np.fft.rfft(mono[:low_block] * low_window)
+    # long FFT for low end hz 118
+    low_window = np.hanning(min(len(mono), LOW_BLOCK))
+    low_fft = np.fft.rfft(mono[:LOW_BLOCK] * low_window)
     mag_low = np.abs(low_fft)
-    freqs_low = np.fft.rfftfreq(low_block, 1.0 / samplerate)
+    freqs_low = np.fft.rfftfreq(LOW_BLOCK, 1.0 / samplerate)
 
     # short FFT for highs
-    high_block = 2048    # ~0.043 s latency
-    high_window = np.hanning(min(len(mono), high_block))
-    high_fft = np.fft.rfft(mono[:high_block] * high_window)
+    high_window = np.hanning(min(len(mono), HIGH_BLOCK))
+    high_fft = np.fft.rfft(mono[:HIGH_BLOCK] * high_window)
     mag_high = np.abs(high_fft)
-    freqs_high = np.fft.rfftfreq(high_block, 1.0 / samplerate)
+    freqs_high = np.fft.rfftfreq(HIGH_BLOCK, 1.0 / samplerate)
 
     # merge around crossover frequency
-    split = 300  # Hz
+    split = SPLIT_FREQ  # Hz
     mask_low = freqs_low < split
     mask_high = freqs_high >= split
+    # Slight bass compensation
+    # bass_boost_freq = 150.0
+    # bass_mask = freqs_low < bass_boost_freq
+    # mag_low[bass_mask] *= 1.2
 
     freqs = np.concatenate((freqs_low[mask_low], freqs_high[mask_high]))
     mag = np.concatenate((mag_low[mask_low], mag_high[mask_high]))
 
 
     # magnitude spectrum
-    mag = np.log10(mag + 1)
-    # A-weighting style correction
-    a_weight = (freqs**2) / (freqs**2 + 200**2)
-    mag *= a_weight
+    # Mild compressive mapping (visual, not physical)
+    mag = np.sqrt(mag + 1e-12)
+
+    # # Slight bass compensation
+
 
     # restrict to frequency window
     mask = (freqs >= fmin) & (freqs <= fmax)
     mag = mag[mask]
     freqs = freqs[mask]
 
-    # combine first few low bins to smooth bass
-    if len(mag) > 5:
-        mag[:5] = np.mean(mag[:5])
+    # --- LOG-SPACED BINS ---  (vectorized, safe)
+    # use precomputed global freq_bins and w
+    idx = np.digitize(freqs, freq_bins) - 1
+    idx = np.clip(idx, 0, w-1)
 
-    # --- LOG-SPACED BINS ---
-    freq_bins = np.geomspace(fmin, fmax, w + 1)
-    values = []
-    for i in range(w):
-        band = (freqs >= freq_bins[i]) & (freqs < freq_bins[i + 1])
-        if np.any(band):
-            values.append(np.mean(mag[band]))
-        else:
-            values.append(0.0)
-    values = np.array(values)
+    
+    # sum and count per bin
+    counts = np.bincount(idx, minlength=w)
+    sums   = np.bincount(idx, weights=mag, minlength=w)
+
+    values = np.zeros(w, dtype=float)
+    nonzero = counts > 0
+    values[nonzero] = sums[nonzero] / counts[nonzero]
     
     # normalize + noise gate
-    values /= np.max(values + 1e-6)
+    peak = np.percentile(values, 95) + 1e-6
+    values = values / peak
+    values = np.clip(values, 0, 1)
     values[values < GATE] = 0
-    values *= h * SCALE_VALUE
-    gain_nodes = values
+    # visual gamma
+    gamma = 1.2  # <1 makes low levels more visible
+    values = np.power(values, gamma)
 
+    # frequency tilt compensation to keep bass and highs visually even
+    tilt = np.power(freq_labels / freq_labels[0], 0.22)
+    values *= tilt
+    values /= np.max(values + 1e-6)
+    values = np.clip(values, 0.0, 1.0)
 
+    #calculate height
+    gain_nodes = values * h * SCALE_VALUE
 
+ # draw vertical frequency label for every bar
+label_surfaces = []
+for x in range(w):
+    label_val = round(freq_labels[x], -1)
+    surf = font.render(str(int(label_val)), True, label_color)
+    surf = pygame.transform.rotate(surf, -90)
+    label_surfaces.append(surf)
 
 stream = sd.InputStream(device=input_device,
                         samplerate=samplerate,
@@ -165,12 +236,6 @@ stream = sd.InputStream(device=input_device,
                         callback=audio_callback)
 stream.start()
 
-# smoothing factor (lower = slower)
-alpha = 0.15 #4
-peak_gain_nodes = np.zeros
-
-freq_bins = np.geomspace(fmin, fmax, w + 1)
-freq_labels = [(freq_bins[i] + freq_bins[i+1]) / 2 for i in range(w)]
 
 while True:
     for e in pygame.event.get():
@@ -193,7 +258,10 @@ while True:
     base_surface.blit(fade_surface, (0, 0))
 
     # exponential smoothing
-    smoothed = alpha * gain_nodes + (1 - alpha) * smoothed 
+    smoothed = alpha * gain_nodes + (1 - alpha) * smoothed
+
+    # Hard floor to kill residual bars
+    smoothed[smoothed < 0.01] = 0.0
 
     # draw gain_nodes and labels
     for x in range(w):
@@ -207,18 +275,18 @@ while True:
         Y_base = total_h - padding_y_bottom - cell_y
         pygame.draw.rect(base_surface, edge_red, (X, Y_base, led_w, led_h))
         pygame.draw.rect(base_surface, core_red, (X+1, Y_base+1, led_w-2, led_h-2))
-
-        # draw vertical frequency label for every bar
-        label_val = round(freq_labels[x], -1)
-        label = f"{int(label_val)}"
-        text_surface = font.render(label, True, label_color)
-        text_surface = pygame.transform.rotate(text_surface, -90)
-        text_rect = text_surface.get_rect(center=(X + led_w / 2, Y_base + led_h + 14))
-        base_surface.blit(text_surface, text_rect)
+        # draw label
+        base_surface.blit(label_surfaces[x], (X, total_h - padding_y_bottom + 4))
 
     
     # after all drawing done on base_surface:
-    scaled = pygame.transform.smoothscale(base_surface, screen.get_size())
-    screen.blit(scaled, (0, 0))
+    cur_size = screen.get_size()
+    if cur_size == last_size:
+        screen.blit(base_surface, (0,0))
+    else:
+        base_scaled = pygame.transform.smoothscale(base_surface, cur_size)
+        screen.blit(base_scaled, (0,0))
+        last_size = cur_size
+
     pygame.display.flip()
     clock.tick(30)
