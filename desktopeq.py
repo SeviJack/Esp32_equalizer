@@ -1,8 +1,9 @@
+import ctypes
 import pygame, sys
 import numpy as np
 import sounddevice as sd
 import win32gui, win32con
-
+from ctypes import wintypes
 #todo
 # custom window frame
 # - transparent background button
@@ -12,14 +13,26 @@ import win32gui, win32con
 # fix the damn logscale for bass
 # add icon
 
-pygame.display.set_caption("ESP32 Audio Visualizer Emulator")
-pygame.init()
-font = pygame.font.SysFont("Consolas", 10)  # small, clear font
+#Constants 
+WM_NCLBUTTONDOWN = 0x00A1
+HTCAPTION = 0x02
 
+user32 = ctypes.windll.user32
+
+# audio analysis parameters
 fmin, fmax = 40, 6000  # Hz range
 SCALE_VALUE = 1  # adjust as needed  # 0.1 = small gain_nodes, 1.0 = full height
 GATE = 0.02         # adjust as needed  # 0.02 = ignore <2% of max power
 DC_CUTTOFF = 0
+
+# audio parameters
+samplerate = 48000
+blocksize = 8192*2  # ~0.16s latency
+
+# visualization parameters
+w = 32  # number of bars
+gain_nodes = np.zeros(w)
+smoothed = np.zeros(w)
 
 # display parameters
 w, h = 32, 32
@@ -40,17 +53,17 @@ edge_red = (120, 20, 10)
 bg = (5, 10, 10)
 label_color = (100, 100, 100)
 
+# Pygame setup
+pygame.display.set_caption("Audio Visualizer Emulator")
+pygame.init()
+font = pygame.font.SysFont("Consolas", 10)  # small, clear font
 
-screen = pygame.display.set_mode((total_w, total_h), pygame.RESIZABLE) #noframe
+# Pygame window setup
+screen = pygame.display.set_mode((total_w, total_h), pygame.RESIZABLE | pygame.NOFRAME) #noframe
 base_surface = pygame.Surface((total_w, total_h))  # offscreen render
 fade_surface = pygame.Surface((total_w, total_h), pygame.SRCALPHA)
+hwnd = pygame.display.get_wm_info()['window']
 
-# audio parameters
-samplerate = 48000
-blocksize = 8192*2  # ~0.16s latency
-
-gain_nodes = np.zeros(w)
-smoothed = np.zeros(w)
 
 # find default output and its loopback
 default_output = sd.default.device[1]
@@ -68,13 +81,17 @@ if loopback_index is None:
 
 input_device = loopback_index
 
-def make_top_level_window(N, cutoff=DC_CUTTOFF):
+def make_top_level_window():
     hwnd = pygame.display.get_wm_info()["window"]
-    win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE,
-                           win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE) | win32con.WS_EX_TOPMOST)
-    win32gui.SetWindowPos(hwnd, win32con.HWND_TOPMOST, 0, 0, 0, 0,
-                          win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | cutoff)
-make_top_level_window(screen, DC_CUTTOFF)
+    win32gui.SetWindowPos(
+        hwnd,
+        win32con.HWND_TOPMOST,
+        0, 0, 0, 0,
+        win32con.SWP_NOMOVE | win32con.SWP_NOSIZE
+    )
+
+make_top_level_window()
+
 
 def audio_callback(indata, frames, time, status):
     global gain_nodes, fmin, fmax
@@ -159,11 +176,18 @@ while True:
     for e in pygame.event.get():
         if e.type == pygame.QUIT:
             stream.stop(); stream.close(); sys.exit()
+
+        if e.type == pygame.MOUSEBUTTONDOWN and e.button == 1:
+            if e.type == pygame.MOUSEBUTTONDOWN and e.button == 1:
+                user32.ReleaseCapture()
+                user32.SendMessageW(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0)
+
         elif e.type == pygame.VIDEORESIZE:
-            screen = pygame.display.set_mode(e.size, pygame.RESIZABLE)
+            screen = pygame.display.set_mode(e.size, pygame.RESIZABLE | pygame.NOFRAME)
             pygame.event.pump()
             hwnd = pygame.display.get_wm_info()["window"]
-            make_top_level_window(hwnd)
+            make_top_level_window()
+
     # clear base surface    
     fade_surface.fill((0, 0, 0, 40))
     base_surface.blit(fade_surface, (0, 0))
@@ -196,6 +220,5 @@ while True:
     # after all drawing done on base_surface:
     scaled = pygame.transform.smoothscale(base_surface, screen.get_size())
     screen.blit(scaled, (0, 0))
-    make_top_level_window(screen, DC_CUTTOFF)
     pygame.display.flip()
     clock.tick(30)
