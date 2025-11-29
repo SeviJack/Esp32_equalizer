@@ -25,9 +25,10 @@
 *.la
 *.a
 *.lib
-build/
+build\
 # Python cache files
 .venv/
+dist/
 # Executables
 *.exe
 *.out
