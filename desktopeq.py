@@ -90,12 +90,41 @@ pygame.display.set_caption("Audio Visualizer Emulator")
 pygame.init()
 font = pygame.font.SysFont("Consolas", 10)  # small, clear font
 
+def set_opacity(alpha: float):
+    """alpha: 0.0-1.0"""
+    a = max(0, min(255, int(alpha * 255)))
+    style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE) | win32con.WS_EX_LAYERED
+    win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, style)
+    win32gui.SetLayeredWindowAttributes(hwnd, 0, a, win32con.LWA_ALPHA)
+
+def enable_clickthrough():
+    style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
+    style |= (win32con.WS_EX_LAYERED | win32con.WS_EX_TRANSPARENT)
+    win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, style)
+
+def disable_clickthrough():
+    style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
+    style &= ~win32con.WS_EX_TRANSPARENT
+    style |= win32con.WS_EX_LAYERED
+    win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, style)
+
+def move_window_bottom_right():
+    sw = user32.GetSystemMetrics(0)
+    sh = user32.GetSystemMetrics(1)
+    ww, wh = screen.get_size()
+    x = sw - ww
+    y = sh - wh
+    win32gui.SetWindowPos(hwnd, 0, x, y, 0, 0, win32con.SWP_NOSIZE | win32con.SWP_NOZORDER)
+
 # Pygame window setup
 screen = pygame.display.set_mode((total_w, total_h), pygame.RESIZABLE | pygame.NOFRAME) #noframe
 base_surface = pygame.Surface((total_w, total_h))  # offscreen render
 fade_surface = pygame.Surface((total_w, total_h), pygame.SRCALPHA)
 hwnd = pygame.display.get_wm_info()['window']
+move_window_bottom_right()
+set_opacity(1.0)
 
+move_window_bottom_right()
 
 # find default output and its loopback
 default_output = sd.default.device[1]
@@ -234,6 +263,7 @@ stream = sd.InputStream(device=input_device,
                         callback=audio_callback)
 stream.start()
 
+hovered = False
 
 while True:
     for e in pygame.event.get():
@@ -250,7 +280,22 @@ while True:
             pygame.event.pump()
             hwnd = pygame.display.get_wm_info()["window"]
             make_top_level_window()
+            move_window_bottom_right()
+            set_opacity(1.0)
+            hovered = False
 
+    cx, cy = win32gui.GetCursorPos()
+    left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+    inside = (left <= cx < right) and (top <= cy < bottom)
+    if inside and not hovered:
+        set_opacity(0.5)
+        enable_clickthrough()
+        hovered = True
+    elif not inside and hovered:
+        set_opacity(1.0)
+        disable_clickthrough()
+        hovered = False
+        
     # clear base surface    
     fade_surface.fill((0, 0, 0, 40))
     base_surface.blit(fade_surface, (0, 0))
