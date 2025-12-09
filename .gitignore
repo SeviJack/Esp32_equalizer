@@ -1,6 +1,6 @@
 # Prerequisites
 *.d
-
+*.exe
 # Compiled Object files
 *.slo
 *.lo
@@ -29,6 +29,7 @@ build/
 # Python cache files
 .venv/
 dist/
+launcher/
 # Executables
 
 *.out

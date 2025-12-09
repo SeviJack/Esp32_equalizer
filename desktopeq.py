@@ -23,6 +23,7 @@ user32 = ctypes.windll.user32
 ATTACK = 0.6   # 0..1, higher = snappier rise
 DECAY  = 0.85  # 0..1, lower = faster fall
 
+input_device = None
 # display parameters
 w, h = 32, 32
 margin_x, margin_y = 6, 2
@@ -116,31 +117,23 @@ def move_window_bottom_right():
     y = sh - wh
     win32gui.SetWindowPos(hwnd, 0, x, y, 0, 0, win32con.SWP_NOSIZE | win32con.SWP_NOZORDER)
 
-# Pygame window setup
-screen = pygame.display.set_mode((total_w, total_h), pygame.RESIZABLE | pygame.NOFRAME) #noframe
-base_surface = pygame.Surface((total_w, total_h))  # offscreen render
-fade_surface = pygame.Surface((total_w, total_h), pygame.SRCALPHA)
-hwnd = pygame.display.get_wm_info()['window']
-move_window_bottom_right()
-set_opacity(1.0)
-
-move_window_bottom_right()
-
 # find default output and its loopback
-default_output = sd.default.device[1]
-output_name = sd.query_devices(default_output)['name']
+def connect_loopback_input():
+    global input_device
+    default_output = sd.default.device[1]
+    output_name = sd.query_devices(default_output)['name']
 
-# look for "(loopback)" version of that device (maybe thread this?)
-devices = sd.query_devices()
-loopback_index = None
-for i, d in enumerate(devices):
-    if "Loopback" in d['name'] and output_name.split(' (')[0] in d['name']:
-        loopback_index = i
-        break
-if loopback_index is None:
-    loopback_index = sd.default.device[0]
+    # look for "(loopback)" version of that device (maybe thread this?)
+    devices = sd.query_devices()
+    loopback_index = None
+    for i, d in enumerate(devices):
+        if "Loopback" in d['name'] and output_name.split(' (')[0] in d['name']:
+            loopback_index = i
+            break
+    if loopback_index is None:
+        loopback_index = sd.default.device[0]
 
-input_device = loopback_index
+    input_device = loopback_index
 
 def make_top_level_window():
     hwnd = pygame.display.get_wm_info()["window"]
@@ -150,8 +143,6 @@ def make_top_level_window():
         0, 0, 0, 0,
         win32con.SWP_NOMOVE | win32con.SWP_NOSIZE
     )
-make_top_level_window()
-
 def move_window_bottom_right():
     hwnd = pygame.display.get_wm_info()["window"]
     screen_w = user32.GetSystemMetrics(0)
@@ -165,8 +156,6 @@ def move_window_bottom_right():
 
     user32.SetWindowPos(hwnd, None, x, y, 0, 0,
                         win32con.SWP_NOSIZE | win32con.SWP_NOZORDER)
-
-move_window_bottom_right()
 
 def audio_callback(indata, frames, time, status):
     global gain_nodes, smoothed, fmin, fmax
@@ -247,6 +236,19 @@ def audio_callback(indata, frames, time, status):
 
     #calculate height
     gain_nodes = values * h * SCALE_VALUE
+
+
+# Pygame window setup
+screen = pygame.display.set_mode((total_w, total_h), pygame.RESIZABLE | pygame.NOFRAME) #noframe
+base_surface = pygame.Surface((total_w, total_h))  # offscreen render
+fade_surface = pygame.Surface((total_w, total_h), pygame.SRCALPHA)
+hwnd = pygame.display.get_wm_info()['window']
+
+set_opacity(1.0)
+make_top_level_window()
+#start
+connect_loopback_input()
+move_window_bottom_right()
 
  # draw vertical frequency label for every bar
 label_surfaces = []
